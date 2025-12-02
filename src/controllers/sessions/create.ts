@@ -1,27 +1,17 @@
 import { Request, Response, NextFunction } from 'express';
-import { getRepository } from 'typeorm';
 
-import { Session } from 'orm/entities/session/Session';
+import { SessionService } from 'services/SessionService';
 import { CustomError } from 'utils/response/custom-error/CustomError';
 
 export const create = async (req: Request, res: Response, next: NextFunction) => {
   const { pc_id, client_phone, Time, Duration, Cost } = req.body;
-
-  const sessionRepository = getRepository(Session);
+  const service = new SessionService();
   try {
-    const session = sessionRepository.create({
-      pc_id,
-      client_phone,
-      Time,
-      Duration,
-      Cost,
-    });
-
-    await sessionRepository.save(session);
-    const savedSession = await sessionRepository.findOne(session.session_id, { relations: ['pc', 'client'] });
-    res.customSuccess(201, 'Session successfully created.', savedSession);
+    const session = await service.create({ pc_id, client_phone, Time, Duration, Cost } as any);
+    res.customSuccess(201, 'Session successfully created.', session);
   } catch (err) {
-    const customError = new CustomError(409, 'Raw', `Session can't be created.`, null, err);
+    const customError =
+      err instanceof CustomError ? err : new CustomError(409, 'Raw', `Session can't be created.`, null, err);
     return next(customError);
   }
 };

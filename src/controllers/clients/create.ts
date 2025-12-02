@@ -1,25 +1,17 @@
 import { Request, Response, NextFunction } from 'express';
-import { getRepository } from 'typeorm';
 
-import { Client } from 'orm/entities/client/Client';
+import { ClientService } from 'services/ClientService';
 import { CustomError } from 'utils/response/custom-error/CustomError';
 
 export const create = async (req: Request, res: Response, next: NextFunction) => {
   const { phone, full_name, birth } = req.body;
-
-  const clientRepository = getRepository(Client);
+  const service = new ClientService();
   try {
-    const client = clientRepository.create({
-      phone,
-      full_name,
-      birth,
-    });
-
-    await clientRepository.save(client);
-    const savedClient = await clientRepository.findOne(phone, { relations: ['sessions'] });
-    res.customSuccess(201, 'Client successfully created.', savedClient);
+    const client = await service.create({ phone, full_name, birth } as any);
+    res.customSuccess(201, 'Client successfully created.', client);
   } catch (err) {
-    const customError = new CustomError(409, 'Raw', `Client can't be created.`, null, err);
+    const customError =
+      err instanceof CustomError ? err : new CustomError(409, 'Raw', `Client can't be created.`, null, err);
     return next(customError);
   }
 };

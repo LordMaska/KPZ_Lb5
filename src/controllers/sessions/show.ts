@@ -1,25 +1,16 @@
 import { Request, Response, NextFunction } from 'express';
-import { getRepository } from 'typeorm';
 
-import { Session } from 'orm/entities/session/Session';
+import { SessionService } from 'services/SessionService';
 import { CustomError } from 'utils/response/custom-error/CustomError';
 
 export const show = async (req: Request, res: Response, next: NextFunction) => {
   const sessionId = req.params.id;
-
-  const sessionRepository = getRepository(Session);
+  const service = new SessionService();
   try {
-    const session = await sessionRepository.findOne(sessionId, { relations: ['pc', 'client'] });
-
-    if (!session) {
-      const customError = new CustomError(404, 'General', `Session with id:${sessionId} not found.`, [
-        'Session not found.',
-      ]);
-      return next(customError);
-    }
+    const session = await service.findOne(sessionId);
     res.customSuccess(200, 'Session found', session);
   } catch (err) {
-    const customError = new CustomError(400, 'Raw', 'Error', null, err);
+    const customError = err instanceof CustomError ? err : new CustomError(400, 'Raw', 'Error', null, err);
     return next(customError);
   }
 };
