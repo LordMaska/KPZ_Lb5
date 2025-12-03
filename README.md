@@ -142,3 +142,208 @@
 **Результат запитів на оновлення та видалення сесії**:
 
 ## ![alt](images/result_session.jpg)
+
+# Лабораторна робота №6: "Впровадження сервісного шару, валідації та DTO"
+
+## Опис реалізованих змін
+
+У рамках даної роботи у структуру проекту було впроваджено сервісний шар, middleware для валідації вхідних даних, а також використання DTO (Data Transfer Objects) для передачі даних між шарами додатку, та адаптовано контролери для роботи з цими нововведеннями.
+
+---
+
+### Сервісний шар
+
+Сервісний шар був доданий для відокремлення бізнес-логіки від контролерів. Кожен контролер тепер викликає відповідні методи сервісів для виконання операцій над сутностями. Це дозволяє покращити організацію коду та полегшує тестування бізнес-логіки.
+
+**Приклад сервіс-класу:**
+
+```typescript
+import { getRepository } from 'typeorm';
+
+import { Client } from 'orm/entities/client/Client';
+import { CustomError } from 'utils/response/custom-error/CustomError';
+
+export class ClientService {
+  private clientRepository = getRepository(Client);
+
+  async findAll() {
+    return this.clientRepository.find({ relations: ['sessions'] });
+  }
+
+  async findOne(phone: string) {
+    const client = await this.clientRepository.findOne(phone, { relations: ['sessions'] });
+    if (!client) {
+      throw new CustomError(404, 'General', `Client with phone:${phone} not found.`, ['Client not found.']);
+    }
+    return client;
+  }
+
+  async create(data: Partial<Client>) {
+    const client = this.clientRepository.create(data as Client);
+    await this.clientRepository.save(client);
+    return this.findOne(client.phone);
+  }
+
+  async update(phone: string, data: Partial<Client>) {
+    const client = await this.findOne(phone);
+    Object.assign(client, data);
+    await this.clientRepository.save(client);
+    return client;
+  }
+
+  async delete(phone: string) {
+    const client = await this.findOne(phone);
+    await this.clientRepository.delete(phone as any);
+    return client;
+  }
+}
+```
+
+---
+
+### Валідація вхідних даних
+
+Для забезпечення коректності вхідних даних було реалізовано middleware, яке перевіряє дані, що надходять у запитах до API. Якщо дані не відповідають визначеним правилам валідації, сервер повертає відповідну помилку, що дозволяє уникнути некоректних операцій з базою даних.
+
+**Приклад middleware для валідації:**
+
+```typescript
+import { Request, Response, NextFunction } from 'express';
+import validator from 'validator';
+
+import { CustomError } from 'utils/response/custom-error/CustomError';
+import { ErrorValidation } from 'utils/response/custom-error/types';
+
+export const validatorCreateClient = async (req: Request, res: Response, next: NextFunction) => {
+  let { phone, full_name, birth } = req.body;
+  const errorsValidation: ErrorValidation[] = [];
+
+  phone = !phone ? '' : phone;
+  full_name = !full_name ? '' : full_name;
+  birth = !birth ? '' : birth;
+
+  if (validator.isEmpty(phone)) {
+    errorsValidation.push({ phone: 'Phone is required' });
+  } else if (!validator.isLength(phone, { min: 1, max: 15 })) {
+    errorsValidation.push({ phone: 'Phone must be at most 15 characters' });
+  }
+
+  if (validator.isEmpty(full_name)) {
+    errorsValidation.push({ full_name: 'Full name is required' });
+  }
+
+  if (validator.isEmpty(birth)) {
+    errorsValidation.push({ birth: 'Birth date is required' });
+  } else if (!validator.isISO8601(birth)) {
+    errorsValidation.push({ birth: 'Birth must be a valid date (ISO 8601)' });
+  }
+
+  if (errorsValidation.length !== 0) {
+    const customError = new CustomError(
+      400,
+      'Validation',
+      'Create Client validation error',
+      null,
+      null,
+      errorsValidation,
+    );
+    return next(customError);
+  }
+
+  return next();
+};
+```
+
+---
+
+### Використання DTO
+
+Для передачі даних між контролерами та сервісами були створені DTO (Data Transfer Objects). DTO дозволяють чітко визначити структуру даних, що передаються, та забезпечують додатковий рівень абстракції, що сприяє кращій організації коду.
+
+**Приклад DTO:**
+
+```typescript
+import { Client } from 'orm/entities/client/Client';
+
+export class ClientResponseDTO {
+  phone: string;
+  full_name: string;
+  birth: string;
+  sessions?: Array<{ session_id: number; Time: string; Duration: string; Cost: number; pc_id: number }>;
+
+  constructor(entity: Client) {
+    this.phone = entity.phone;
+    this.full_name = entity.full_name;
+    this.birth = entity.birth;
+    if (entity.sessions && Array.isArray(entity.sessions)) {
+      this.sessions = entity.sessions.map((s) => ({
+        session_id: s.session_id,
+        Time: s.Time,
+        Duration: s.Duration,
+        Cost: s.Cost,
+        pc_id: s.pc_id,
+      }));
+    }
+  }
+}
+```
+
+---
+
+### Адаптація контролерів
+
+Контролери були адаптовані для роботи з новим сервісним шаром та DTO. Вони тепер відповідають лише за обробку HTTP-запитів та виклик відповідних сервісів, що покращує їх читабельність та підтримуваність.
+
+**Приклад адаптованого контролера:**
+
+```typescript
+import { Request, Response, NextFunction } from 'express';
+
+import { ClientService } from 'services/ClientService';
+import { CustomError } from 'utils/response/custom-error/CustomError';
+
+export const create = async (req: Request, res: Response, next: NextFunction) => {
+  const { phone, full_name, birth } = req.body;
+  const service = new ClientService();
+  try {
+    const client = await service.create({ phone, full_name, birth } as any);
+    res.customSuccess(201, 'Client successfully created.', client);
+  } catch (err) {
+    const customError =
+      err instanceof CustomError ? err : new CustomError(409, 'Raw', `Client can't be created.`, null, err);
+    return next(customError);
+  }
+};
+```
+
+---
+
+## Демонстрація роботи нововведень на прикладі запитів у Postman
+
+### Невалідні запити:
+
+**Створення ПК:**
+
+![alt](images/invalid_post_pc.jpg)
+
+**Створення Клієнта:**
+
+![alt](images/invalid_post_client.jpg)
+
+**Створення Сесії:**
+
+![alt](images/invalid_post_session.jpg)
+
+### Валідні запити:
+
+**Створення ПК:**
+
+![alt](images/valid_post_pc.jpg)
+
+**Створення Клієнта:**
+
+![alt](images/valid_post_client.jpg)
+
+**Створення Сесії:**
+
+![alt](images/valid_post_session.jpg)
